@@ -7,12 +7,16 @@ import java.nio.file.Path
 import akka.actor.{ActorSystem, Props}
 import akka.testkit.{ImplicitSender, TestKit, TestProbe}
 import javax.jms.{Connection, DeliveryMode, Session}
+import javax.xml.stream.events.EndDocument
 
 import akka.NotUsed
 import akka.stream.ActorMaterializer
 import akka.stream.alpakka.file.DirectoryChange
+import akka.stream.alpakka.file.scaladsl.FileTailSource
 import akka.stream.alpakka.file.scaladsl.DirectoryChangesSource
-import akka.stream.scaladsl.{Sink, Source}
+import akka.stream.alpakka.xml.{Characters, ParseEvent, StartElement}
+import akka.stream.alpakka.xml.scaladsl.XmlParsing
+import akka.stream.scaladsl.{Broadcast, Flow, Sink, Source}
 import akka.stream.testkit.scaladsl.TestSink
 import org.apache.activemq.ActiveMQConnectionFactory
 import org.apache.activemq.broker.BrokerRegistry
@@ -32,7 +36,6 @@ class ConsumerTest extends TestKit(ActorSystem("ConsumerTest"))
   override def beforeAll(): Unit = {
     if (!dir.exists()) {
       dir.mkdir()
-      println(dir.getAbsolutePath)
     }
     //remove active mq data if it exists
     val mqData = new File("activemq-data")
@@ -48,8 +51,21 @@ class ConsumerTest extends TestKit(ActorSystem("ConsumerTest"))
   "Consumer" must {
     "pickup xml files" in {
 
-      val sourceUnderTest =
+      val sourceUnderTest: Source[Order, NotUsed] =
         DirectoryChangesSource(dir.toPath, pollInterval = 500.millis, maxBufferSize = 1000)
+          .flatMapConcat {
+            case (path, DirectoryChange.Creation) =>
+              FileTailSource(path, maxChunkSize = 1024, startingPosition = 0, pollingInterval = 500.millis)
+                .via(XmlParsing.parser)
+                .via(XmlParsing.subslice("order" :: "productId" :: Nil))
+                .map {
+                  case e =>
+                    println(e)
+                    new Order("me", "Akka in Action", 10)
+                }
+            case _ =>
+              Source.empty[Order]
+          }
 
       val msg = new Order("me", "Akka in Action", 10)
       val xml = <order>
@@ -60,15 +76,13 @@ class ConsumerTest extends TestKit(ActorSystem("ConsumerTest"))
 
       val msgFile = new File(dir, "msg1.xml")
 
-      val changes: Future[(Path, DirectoryChange)] =
+      val changes: Future[Order] =
         sourceUnderTest
-          .runWith(Sink.head[(Path, DirectoryChange)])
+          .runWith(Sink.head[Order])
 
       FileUtils.write(msgFile, xml.toString())
 
-      Await.result(changes, 10.seconds) must be(
-        (msgFile.toPath, DirectoryChange.Creation)
-      )
+      Await.result(changes, 10.seconds) must be(msg)
     }
     "pickup xml TCPConnection" ignore {
     }
