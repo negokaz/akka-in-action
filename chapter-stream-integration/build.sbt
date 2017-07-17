@@ -1,0 +1,31 @@
+name := "integration"
+
+version := "1.0"
+
+organization := "manning"
+
+libraryDependencies ++= {
+  val akkaVersion = "2.5.0"
+  val alpakkaVersion = "0.10"
+  val activeMQVersion = "5.4.1"
+  val akkaHttpVersion = "10.0.0"
+  Seq(
+    "org.scala-lang.modules"  %% "scala-xml" 				                 % "1.0.6",
+    "com.typesafe.akka"       %% "akka-actor"                        % akkaVersion,
+    "com.typesafe.akka"       %% "akka-slf4j"                        % akkaVersion,
+    "com.typesafe.akka"       %% "akka-http-core"                    % akkaHttpVersion,
+    "com.typesafe.akka"       %% "akka-http"                         % akkaHttpVersion,
+    "com.typesafe.akka"       %% "akka-http-spray-json"              % akkaHttpVersion,
+    "com.typesafe.akka"       %% "akka-http-xml"                     % akkaHttpVersion,
+    "com.lightbend.akka"      %% "akka-stream-alpakka-file"          % alpakkaVersion,
+    "com.lightbend.akka"      %% "akka-stream-alpakka-amqp"          % alpakkaVersion,
+    "com.lightbend.akka"      %% "akka-stream-alpakka-xml"           % alpakkaVersion,
+    "ch.qos.logback"          %  "logback-classic"                   % "1.1.3",
+    "commons-io"              %  "commons-io"                        % "2.0.1"         % "test",
+    "org.apache.activemq"     %  "activemq-core"                     % activeMQVersion % "test",
+    "com.typesafe.akka"       %% "akka-http-testkit"                 % akkaHttpVersion % "test",
+    "com.typesafe.akka"       %% "akka-testkit"                      % akkaVersion     % "test",
+    "org.scalatest"           %% "scalatest"                         % "3.0.0"         % "test"
+  )
+}
+
