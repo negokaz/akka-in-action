@@ -19,7 +19,6 @@ libraryDependencies ++= {
     "com.typesafe.akka"       %% "akka-http-xml"                     % akkaHttpVersion,
     "com.lightbend.akka"      %% "akka-stream-alpakka-file"          % alpakkaVersion,
     "com.lightbend.akka"      %% "akka-stream-alpakka-amqp"          % alpakkaVersion,
-    "com.lightbend.akka"      %% "akka-stream-alpakka-xml"           % alpakkaVersion,
     "ch.qos.logback"          %  "logback-classic"                   % "1.1.3",
     "commons-io"              %  "commons-io"                        % "2.0.1"         % "test",
     "org.apache.activemq"     %  "activemq-core"                     % activeMQVersion % "test",
