@@ -12,10 +12,7 @@ import javax.xml.stream.events.EndDocument
 import akka.NotUsed
 import akka.stream.{ActorMaterializer, ClosedShape}
 import akka.stream.alpakka.file.DirectoryChange
-import akka.stream.alpakka.file.scaladsl.FileTailSource
 import akka.stream.alpakka.file.scaladsl.DirectoryChangesSource
-import akka.stream.alpakka.xml.{Characters, EndElement, ParseEvent, StartElement}
-import akka.stream.alpakka.xml.scaladsl.XmlParsing
 import akka.stream.scaladsl.{Broadcast, Flow, GraphDSL, Merge, RunnableGraph, Sink, Source}
 import akka.stream.testkit.scaladsl.TestSink
 import akka.util.ByteString
@@ -64,11 +61,8 @@ class ConsumerTest extends TestKit(ActorSystem("ConsumerTest"))
 
       val newFileSource: Source[Path, NotUsed] =
         DirectoryChangesSource(dir.toPath, pollInterval = 500.millis, maxBufferSize = 1000)
-          .flatMapConcat {
-            case (path, DirectoryChange.Creation) =>
-              Source.single(path)
-            case _ =>
-              Source.empty[Path]
+          .collect {
+            case (path, DirectoryChange.Creation) => path
           }
 
       val msg = new Order("me", "Akka in Action", 10)
