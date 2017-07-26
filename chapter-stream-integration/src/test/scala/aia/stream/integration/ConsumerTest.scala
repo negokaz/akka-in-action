@@ -10,14 +10,15 @@ import javax.jms.{Connection, DeliveryMode, Session}
 import javax.xml.stream.events.EndDocument
 
 import akka.NotUsed
-import akka.stream.ActorMaterializer
+import akka.stream.{ActorMaterializer, ClosedShape}
 import akka.stream.alpakka.file.DirectoryChange
 import akka.stream.alpakka.file.scaladsl.FileTailSource
 import akka.stream.alpakka.file.scaladsl.DirectoryChangesSource
-import akka.stream.alpakka.xml.{Characters, ParseEvent, StartElement}
+import akka.stream.alpakka.xml.{Characters, EndElement, ParseEvent, StartElement}
 import akka.stream.alpakka.xml.scaladsl.XmlParsing
-import akka.stream.scaladsl.{Broadcast, Flow, Sink, Source}
+import akka.stream.scaladsl.{Broadcast, Flow, GraphDSL, Merge, RunnableGraph, Sink, Source}
 import akka.stream.testkit.scaladsl.TestSink
+import akka.util.ByteString
 import org.apache.activemq.ActiveMQConnectionFactory
 import org.apache.activemq.broker.BrokerRegistry
 import org.apache.commons.io.FileUtils
@@ -25,6 +26,7 @@ import org.scalatest.{BeforeAndAfterAll, MustMatchers, WordSpecLike}
 
 import scala.concurrent.duration._
 import scala.concurrent.{Await, Future}
+import scala.xml.XML
 
 class ConsumerTest extends TestKit(ActorSystem("ConsumerTest"))
   with WordSpecLike with BeforeAndAfterAll with MustMatchers {
@@ -55,17 +57,17 @@ class ConsumerTest extends TestKit(ActorSystem("ConsumerTest"))
         DirectoryChangesSource(dir.toPath, pollInterval = 500.millis, maxBufferSize = 1000)
           .flatMapConcat {
             case (path, DirectoryChange.Creation) =>
-              FileTailSource(path, maxChunkSize = 1024, startingPosition = 0, pollingInterval = 500.millis)
-                .via(XmlParsing.parser)
-                .via(XmlParsing.subslice("order" :: "productId" :: Nil))
-                .map {
-                  case e =>
-                    println(e)
-                    new Order("me", "Akka in Action", 10)
-                }
+              val xmlString = scala.io.Source.fromFile(path.toFile).mkString
+              val xml = XML.loadString(xmlString)
+              val order = xml \\ "order"
+              val customer = (order \\ "customerId").text
+              val productId = (order \\ "productId").text
+              val number = (order \\ "number").text.toInt
+              Source.single(new Order(customer, productId, number))
             case _ =>
               Source.empty[Order]
           }
+
 
       val msg = new Order("me", "Akka in Action", 10)
       val xml = <order>
