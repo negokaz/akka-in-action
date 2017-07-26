@@ -50,24 +50,26 @@ class ConsumerTest extends TestKit(ActorSystem("ConsumerTest"))
     FileUtils.deleteDirectory(dir)
   }
 
+  val parseOrderXmlFlow = Flow[String].map { xmlString =>
+    val xml = XML.loadString(xmlString)
+    val order = xml \\ "order"
+    val customer = (order \\ "customerId").text
+    val productId = (order \\ "productId").text
+    val number = (order \\ "number").text.toInt
+    new Order(customer, productId, number)
+  }
+
   "Consumer" must {
     "pickup xml files" in {
 
-      val sourceUnderTest: Source[Order, NotUsed] =
+      val newFileSource: Source[Path, NotUsed] =
         DirectoryChangesSource(dir.toPath, pollInterval = 500.millis, maxBufferSize = 1000)
           .flatMapConcat {
             case (path, DirectoryChange.Creation) =>
-              val xmlString = scala.io.Source.fromFile(path.toFile).mkString
-              val xml = XML.loadString(xmlString)
-              val order = xml \\ "order"
-              val customer = (order \\ "customerId").text
-              val productId = (order \\ "productId").text
-              val number = (order \\ "number").text.toInt
-              Source.single(new Order(customer, productId, number))
+              Source.single(path)
             case _ =>
-              Source.empty[Order]
+              Source.empty[Path]
           }
-
 
       val msg = new Order("me", "Akka in Action", 10)
       val xml = <order>
@@ -79,7 +81,9 @@ class ConsumerTest extends TestKit(ActorSystem("ConsumerTest"))
       val msgFile = new File(dir, "msg1.xml")
 
       val changes: Future[Order] =
-        sourceUnderTest
+        newFileSource
+          .map(path => scala.io.Source.fromFile(path.toFile).mkString)
+          .via(parseOrderXmlFlow)
           .runWith(Sink.head[Order])
 
       FileUtils.write(msgFile, xml.toString())
