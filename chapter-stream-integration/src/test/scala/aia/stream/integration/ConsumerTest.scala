@@ -201,11 +201,6 @@ class ConsumerTest extends TestKit(ActorSystem("ConsumerTest"))
 
       Await.result(orderFuture, 10 seconds) must be(msg)
     }
-    "pickup 2 xml files" ignore {
-    }
-    "pickup 2 xml TCPConnection" ignore {
-    }
-
   }
 
   "The Producer" must {
