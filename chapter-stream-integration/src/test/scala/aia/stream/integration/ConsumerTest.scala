@@ -10,11 +10,14 @@ import javax.jms.{Connection, DeliveryMode, Session}
 
 import akka.{Done, NotUsed}
 import akka.stream.ActorMaterializer
+import akka.stream.alpakka.amqp.{AmqpConnectionUri, NamedQueueSourceSettings, QueueDeclaration}
+import akka.stream.alpakka.amqp.scaladsl.AmqpSource
 import akka.stream.alpakka.file.DirectoryChange
 import akka.stream.alpakka.file.scaladsl.DirectoryChangesSource
 import akka.stream.scaladsl.{Flow, Framing, Keep, Sink, Source, Tcp}
 import akka.stream.testkit.scaladsl.TestSink
 import akka.util.ByteString
+import com.rabbitmq.client.{AMQP, ConnectionFactory}
 import org.apache.activemq.ActiveMQConnectionFactory
 import org.apache.activemq.broker.BrokerRegistry
 import org.apache.commons.io.FileUtils
@@ -172,9 +175,31 @@ class ConsumerTest extends TestKit(ActorSystem("ConsumerTest"))
       Await.result(orderProbeFuture, 10.seconds).requestNext() must be(msg)
       Await.result(responseFuture, 10.seconds) must be("<confirm>OK</confirm>")
     }
-    "pickup xml ActiveMQ" ignore {
+    "pickup xml RabbitMQ" in {
+      val queueName = "xmlTest"
+      val amqpSource = AmqpSource(
+        NamedQueueSourceSettings(
+          AmqpConnectionUri("amqp://localhost:8899"),
+          queueName
+        ),
+        bufferSize = 10
+      )
 
+      val msg = new Order("me", "Akka in Action", 10)
+      val xml = <order>
+                  <customerId>{ msg.customerId }</customerId>
+                  <productId>{ msg.productId }</productId>
+                  <number>{ msg.number }</number>
+                </order>
 
+      sendMQMessage(xml.toString)
+
+      val orderFuture = amqpSource
+        .map(_.bytes.utf8String)
+        .via(parseOrderXmlFlow)
+        .toMat(Sink.head)(Keep.right).run()
+
+      Await.result(orderFuture, 10 seconds) must be(msg)
     }
     "pickup 2 xml files" ignore {
     }
@@ -192,33 +217,27 @@ class ConsumerTest extends TestKit(ActorSystem("ConsumerTest"))
     }
   }
   def sendMQMessage(msg: String): Unit = {
+    val queueName = "xmlTest"
+
     // Create a ConnectionFactory
-    val connectionFactory =
-      new ActiveMQConnectionFactory("tcp://localhost:8899");
+    val connectionFactory = new ConnectionFactory
+    connectionFactory.setUri("amqp://localhost:8899")
 
     // Create a Connection
-    val connection: Connection = connectionFactory.createConnection()
-    connection.start()
+    val connection = connectionFactory.newConnection()
 
-    // Create a Session
-    val session = connection.createSession(false,
-      Session.AUTO_ACKNOWLEDGE)
+    // Create a Channel
+    val channel = connection.createChannel()
+    channel.queueDeclare(queueName, true, false, false, null)
 
-    // Create the destination (Topic or Queue)
-    val destination = session.createQueue("xmlTest");
-
-    // Create a MessageProducer from the Session to the Topic or Queue
-    val producer = session.createProducer(destination);
-    producer.setDeliveryMode(DeliveryMode.NON_PERSISTENT);
-
-    // Create a messages
-    val message = session.createTextMessage(msg);
-
-    // Tell the producer to send the message
-    producer.send(message);
+    // send the message
+    channel.basicPublish("", queueName,
+      new AMQP.BasicProperties.Builder().build(),
+      msg.getBytes()
+    )
 
     // Clean up
-    session.close();
-    connection.close();
+    channel.close()
+    connection.close()
   }
 }
