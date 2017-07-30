@@ -85,6 +85,7 @@ class ConsumerTest extends TestKit(ActorSystem("ConsumerTest"))
     }
     "pickup xml TCPConnection" in {
       import Tcp._
+      import system.dispatcher
 
       val msg = new Order("me", "Akka in Action", 10)
       val xml = <order>
@@ -97,41 +98,83 @@ class ConsumerTest extends TestKit(ActorSystem("ConsumerTest"))
 
       val tcpSource: Source[IncomingConnection, Future[ServerBinding]] =
         Tcp().bind("localhost", 8887)
-          .mapMaterializedValue { binding =>
-            import system.dispatcher
-            binding.foreach { _ =>
-              val socket = new Socket("localhost", 8887)
-              // send XML
-              val outputWriter = new PrintWriter(socket.getOutputStream, true)
-              outputWriter.println(xmlStr)
-              outputWriter.flush()
-              outputWriter.close()
-            }
-            binding
-          }
 
-      val probe =
+      val (serverBindingFuture, orderProbeFuture) =
         tcpSource.map { connection =>
 
-            val handleFlow =
-              Flow[ByteString]
-                .via(Framing.delimiter(ByteString("\n"), maximumFrameLength = 256, allowTruncation = true))
-                .map(_.utf8String)
-                .via(parseOrderXmlFlow)
-                .alsoToMat(TestSink.probe[Order])(Keep.right)
-                .map(_ => ByteString("<confirm>OK</confirm>"))
+          val handleFlow =
+            Flow[ByteString]
+              .via(Framing.delimiter(ByteString("\n"), maximumFrameLength = 256, allowTruncation = true))
+              .map(_.utf8String)
+              .via(parseOrderXmlFlow)
+              .alsoToMat(TestSink.probe[Order])(Keep.right)
+              .map(_ => ByteString("<confirm>OK</confirm>"))
 
-            connection.handleWith(handleFlow)
-          }.toMat(Sink.head)(Keep.right).run()
+          connection.handleWith(handleFlow)
+        }.toMat(Sink.head)(Keep.both).run()
 
+      serverBindingFuture.foreach { _ =>
+        val socket = new Socket("localhost", 8887)
+        // send XML
+        val outputWriter = new PrintWriter(socket.getOutputStream, true)
+        outputWriter.println(xmlStr)
+        outputWriter.flush()
+        outputWriter.close()
+      }
 
-      Await.result(probe, 10.seconds).requestNext() must be(msg)
+      Await.result(orderProbeFuture, 10.seconds).requestNext() must be(msg)
     }
     "confirm xml TCPConnection" ignore {
+      import Tcp._
+      import system.dispatcher
 
+      val msg = new Order("me", "Akka in Action", 10)
+      val xml = <order>
+                  <customerId>{ msg.customerId }</customerId>
+                  <productId>{ msg.productId }</productId>
+                  <number>{ msg.number }</number>
+                </order>
 
+      val xmlStr = xml.toString.replace("\n", "")
+
+      val tcpSource: Source[IncomingConnection, Future[ServerBinding]] =
+        Tcp().bind("localhost", 8887)
+
+      val (serverBindingFuture, orderProbeFuture) =
+        tcpSource.map { connection =>
+
+          val handleFlow =
+            Flow[ByteString]
+              .via(Framing.delimiter(ByteString("\n"), maximumFrameLength = 256, allowTruncation = true))
+              .map(_.utf8String)
+              .via(parseOrderXmlFlow)
+              .alsoToMat(TestSink.probe[Order])(Keep.right)
+              .map(_ => ByteString("<confirm>OK</confirm>"))
+
+          connection.handleWith(handleFlow)
+        }.toMat(Sink.head)(Keep.both).run()
+
+      val responseFuture = serverBindingFuture.map { _ =>
+        val socket = new Socket("localhost", 8887)
+        // send XML
+        val outputWriter = new PrintWriter(socket.getOutputStream, true)
+        outputWriter.println(xmlStr)
+        outputWriter.flush()
+        // receive response
+        val responseReader = new BufferedReader(new InputStreamReader(socket.getInputStream))
+        val response = responseReader.readLine()
+
+        responseReader.close()
+        outputWriter.close()
+        response
+      }
+
+      Await.result(orderProbeFuture, 10.seconds).requestNext() must be(msg)
+      Await.result(responseFuture, 10.seconds) must be("<confirm>OK</confirm>")
     }
     "pickup xml ActiveMQ" ignore {
+
+
     }
     "pickup 2 xml files" ignore {
     }
