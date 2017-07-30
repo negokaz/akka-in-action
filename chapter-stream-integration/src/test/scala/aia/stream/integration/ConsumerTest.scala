@@ -4,16 +4,15 @@ import java.io.{BufferedReader, File, InputStreamReader, PrintWriter}
 import java.net.Socket
 import java.nio.file.Path
 
-import akka.actor.{ActorSystem, Props}
-import akka.testkit.{ImplicitSender, TestKit, TestProbe}
+import akka.actor.ActorSystem
+import akka.testkit.TestKit
 import javax.jms.{Connection, DeliveryMode, Session}
-import javax.xml.stream.events.EndDocument
 
-import akka.NotUsed
-import akka.stream.{ActorMaterializer, ClosedShape}
+import akka.{Done, NotUsed}
+import akka.stream.ActorMaterializer
 import akka.stream.alpakka.file.DirectoryChange
 import akka.stream.alpakka.file.scaladsl.DirectoryChangesSource
-import akka.stream.scaladsl.{Broadcast, Flow, GraphDSL, Merge, RunnableGraph, Sink, Source}
+import akka.stream.scaladsl.{Flow, Framing, Keep, Sink, Source, Tcp}
 import akka.stream.testkit.scaladsl.TestSink
 import akka.util.ByteString
 import org.apache.activemq.ActiveMQConnectionFactory
@@ -84,9 +83,53 @@ class ConsumerTest extends TestKit(ActorSystem("ConsumerTest"))
 
       Await.result(changes, 10.seconds) must be(msg)
     }
-    "pickup xml TCPConnection" ignore {
+    "pickup xml TCPConnection" in {
+      import Tcp._
+
+      val msg = new Order("me", "Akka in Action", 10)
+      val xml = <order>
+                  <customerId>{ msg.customerId }</customerId>
+                  <productId>{ msg.productId }</productId>
+                  <number>{ msg.number }</number>
+                </order>
+
+      val xmlStr = xml.toString.replace("\n", "")
+
+      val tcpSource: Source[IncomingConnection, Future[ServerBinding]] =
+        Tcp().bind("localhost", 8887)
+          .mapMaterializedValue { binding =>
+            import system.dispatcher
+            binding.foreach { _ =>
+              val socket = new Socket("localhost", 8887)
+              // send XML
+              val outputWriter = new PrintWriter(socket.getOutputStream, true)
+              outputWriter.println(xmlStr)
+              outputWriter.flush()
+              outputWriter.close()
+            }
+            binding
+          }
+
+      val probe =
+        tcpSource.map { connection =>
+
+            val handleFlow =
+              Flow[ByteString]
+                .via(Framing.delimiter(ByteString("\n"), maximumFrameLength = 256, allowTruncation = true))
+                .map(_.utf8String)
+                .via(parseOrderXmlFlow)
+                .alsoToMat(TestSink.probe[Order])(Keep.right)
+                .map(_ => ByteString("<confirm>OK</confirm>"))
+
+            connection.handleWith(handleFlow)
+          }.toMat(Sink.head)(Keep.right).run()
+
+
+      Await.result(probe, 10.seconds).requestNext() must be(msg)
     }
     "confirm xml TCPConnection" ignore {
+
+
     }
     "pickup xml ActiveMQ" ignore {
     }
