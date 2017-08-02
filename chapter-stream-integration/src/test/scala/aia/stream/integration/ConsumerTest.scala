@@ -86,47 +86,6 @@ class ConsumerTest extends TestKit(ActorSystem("ConsumerTest"))
 
       Await.result(changes, 10.seconds) must be(msg)
     }
-    "pickup xml TCPConnection" in {
-      import Tcp._
-      import system.dispatcher
-
-      val msg = new Order("me", "Akka in Action", 10)
-      val xml = <order>
-                  <customerId>{ msg.customerId }</customerId>
-                  <productId>{ msg.productId }</productId>
-                  <number>{ msg.number }</number>
-                </order>
-
-      val xmlStr = xml.toString.replace("\n", "")
-
-      val tcpSource: Source[IncomingConnection, Future[ServerBinding]] =
-        Tcp().bind("localhost", 8887)
-
-      val (serverBindingFuture, orderProbeFuture) =
-        tcpSource.map { connection =>
-
-          val handleFlow =
-            Flow[ByteString]
-              .via(Framing.delimiter(ByteString("\n"), maximumFrameLength = 256, allowTruncation = true))
-              .map(_.utf8String)
-              .via(parseOrderXmlFlow)
-              .alsoToMat(TestSink.probe[Order])(Keep.right)
-              .map(_ => ByteString("<confirm>OK</confirm>"))
-
-          connection.handleWith(handleFlow)
-        }.toMat(Sink.head)(Keep.both).run()
-
-      serverBindingFuture.foreach { _ =>
-        val socket = new Socket("localhost", 8887)
-        // send XML
-        val outputWriter = new PrintWriter(socket.getOutputStream)
-        outputWriter.println(xmlStr)
-        outputWriter.flush()
-        outputWriter.close()
-      }
-
-      Await.result(orderProbeFuture, 10.seconds).requestNext() must be(msg)
-    }
     "confirm xml TCPConnection" in {
       import Tcp._
       import system.dispatcher
@@ -160,35 +119,25 @@ class ConsumerTest extends TestKit(ActorSystem("ConsumerTest"))
           connection.handleWith(handleFlow)
         }.toMat(Sink.head)(Keep.both).run()
 
-      val responseFuture = serverBindingFuture.flatMap { _ =>
+      val responseFuture = serverBindingFuture.map { _ =>
+        // サーバーサイドのソケットがバインドされた後、
+        // クライアントサイドのソケットを作成し、リクエストを送信
         val socket = new Socket("localhost", 8887)
 
         val outputWriter = new PrintWriter(socket.getOutputStream)
         val responseReader = new BufferedReader(new InputStreamReader(socket.getInputStream))
 
-        val responseFuture = for {
-          _ <- Future {
-            // send XML
-            outputWriter.println(xmlStr)
-            outputWriter.flush()
-            NotUsed
-          }
-          response <- Future {
-            // receive response
-            responseReader.readLine()
-          }
-        } yield response
+        outputWriter.println(xmlStr)
+        outputWriter.flush()
+        val response = responseReader.readLine()
+        responseReader.close()
+        outputWriter.close()
 
-        responseFuture.map { response =>
-          responseReader.close()
-          outputWriter.close()
-          response
-        }
+        response
       }
 
-      val probe = Await.result(orderProbeFuture, 10.seconds)
+      Await.result(orderProbeFuture, 10.seconds).requestNext() must be(msg)
       Await.result(responseFuture, 20.seconds) must be("<confirm>OK</confirm>")
-      probe.cancel()
     }
     "pickup xml RabbitMQ" in {
       val queueName = "xmlTest"
