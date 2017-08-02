@@ -119,7 +119,7 @@ class ConsumerTest extends TestKit(ActorSystem("ConsumerTest"))
       serverBindingFuture.foreach { _ =>
         val socket = new Socket("localhost", 8887)
         // send XML
-        val outputWriter = new PrintWriter(socket.getOutputStream, true)
+        val outputWriter = new PrintWriter(socket.getOutputStream)
         outputWriter.println(xmlStr)
         outputWriter.flush()
         outputWriter.close()
@@ -127,7 +127,7 @@ class ConsumerTest extends TestKit(ActorSystem("ConsumerTest"))
 
       Await.result(orderProbeFuture, 10.seconds).requestNext() must be(msg)
     }
-    "confirm xml TCPConnection" ignore {
+    "confirm xml TCPConnection" in {
       import Tcp._
       import system.dispatcher
 
@@ -146,34 +146,49 @@ class ConsumerTest extends TestKit(ActorSystem("ConsumerTest"))
       val (serverBindingFuture, orderProbeFuture) =
         tcpSource.map { connection =>
 
+          val confirm = Source.single("<confirm>OK</confirm>\n")
+
           val handleFlow =
             Flow[ByteString]
               .via(Framing.delimiter(ByteString("\n"), maximumFrameLength = 256, allowTruncation = true))
               .map(_.utf8String)
               .via(parseOrderXmlFlow)
               .alsoToMat(TestSink.probe[Order])(Keep.right)
-              .map(_ => ByteString("<confirm>OK</confirm>"))
+              .merge(confirm)
+              .map(c => ByteString(c.toString))
 
           connection.handleWith(handleFlow)
         }.toMat(Sink.head)(Keep.both).run()
 
-      val responseFuture = serverBindingFuture.map { _ =>
+      val responseFuture = serverBindingFuture.flatMap { _ =>
         val socket = new Socket("localhost", 8887)
-        // send XML
-        val outputWriter = new PrintWriter(socket.getOutputStream, true)
-        outputWriter.println(xmlStr)
-        outputWriter.flush()
-        // receive response
-        val responseReader = new BufferedReader(new InputStreamReader(socket.getInputStream))
-        val response = responseReader.readLine()
 
-        responseReader.close()
-        outputWriter.close()
-        response
+        val outputWriter = new PrintWriter(socket.getOutputStream)
+        val responseReader = new BufferedReader(new InputStreamReader(socket.getInputStream))
+
+        val responseFuture = for {
+          _ <- Future {
+            // send XML
+            outputWriter.println(xmlStr)
+            outputWriter.flush()
+            NotUsed
+          }
+          response <- Future {
+            // receive response
+            responseReader.readLine()
+          }
+        } yield response
+
+        responseFuture.map { response =>
+          responseReader.close()
+          outputWriter.close()
+          response
+        }
       }
 
-      Await.result(orderProbeFuture, 10.seconds).requestNext() must be(msg)
-      Await.result(responseFuture, 10.seconds) must be("<confirm>OK</confirm>")
+      val probe = Await.result(orderProbeFuture, 10.seconds)
+      Await.result(responseFuture, 20.seconds) must be("<confirm>OK</confirm>")
+      probe.cancel()
     }
     "pickup xml RabbitMQ" in {
       val queueName = "xmlTest"

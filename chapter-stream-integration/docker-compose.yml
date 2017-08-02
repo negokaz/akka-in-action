@@ -1,0 +1,7 @@
+version: "3"
+
+services:
+  RabbitMQ:
+    image: rabbitmq:3.6.10-alpine
+    ports:
+      - 8899:5672
