@@ -168,11 +168,43 @@ class ConsumerTest extends TestKit(ActorSystem("ConsumerTest"))
   }
 
   "The Producer" must {
-    "send msg using TCPConnection" ignore {
-    }
-    "send Xml using TCPConnection" ignore {
-    }
-    "receive confirmation when send Xml" ignore {
+    "send msg using TCPConnection" in {
+      import system.dispatcher
+
+      val serverBindingFuture =
+        Tcp().bind("localhost", 8887).map { connection =>
+          val handleFlow =
+            Flow[ByteString]
+              .via(Framing.delimiter(ByteString("\n"), maximumFrameLength = 256, allowTruncation = true))
+              .map(_.utf8String)
+              .via(parseOrderXmlFlow)
+              .merge(Source.single("<confirm>OK</confirm>"))
+              .map(c => ByteString(c.toString))
+          connection.handleWith(handleFlow)
+        }.to(Sink.ignore).run()
+
+      val msg = new Order("me", "Akka in Action", 10)
+      val xml = <order>
+                  <customerId>{ msg.customerId }</customerId>
+                  <productId>{ msg.productId }</productId>
+                  <number>{ msg.number }</number>
+                </order>
+      val xmlStr = xml.toString().replace("\n", "")
+
+      val probeFuture =
+        serverBindingFuture.map { _ =>
+
+          val handleFlow =
+            Flow[ByteString]
+                .alsoToMat(TestSink.probe)(Keep.right)
+                .merge(Source.single(xmlStr))
+                .map(c => ByteString(c.toString))
+
+          val connection = Tcp().outgoingConnection("localhost", 8887)
+          connection.joinMat(handleFlow)(Keep.right).run()
+        }
+
+      Await.result(probeFuture, 10 seconds).requestNext().utf8String must be ("<confirm>OK</confirm>")
     }
   }
   def sendMQMessage(msg: String): Unit = {
