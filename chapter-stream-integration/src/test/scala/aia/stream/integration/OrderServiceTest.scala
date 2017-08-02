@@ -9,27 +9,32 @@ import org.scalatest.{Matchers, WordSpec}
 import scala.concurrent.duration._
 import scala.xml.NodeSeq
 
-abstract class OrderServiceTest extends WordSpec
+class OrderServiceTest extends WordSpec
     with Matchers 
     with OrderService
     with ScalatestRouteTest {
+
+  val processOrders =
+    system.actorOf(Props(new ProcessOrders), "orders")
 
   implicit val executionContext = system.dispatcher
   implicit val requestTimeout = akka.util.Timeout(1 second)
 
   "The order service" should {
-    "return NotFound if the order cannot be found" ignore {
+
+    "return NotFound if the order cannot be found" in {
       Get("/orders/1") ~> routes ~> check {
         status shouldEqual StatusCodes.NotFound
       }
     }
 
-    "return the tracking order for an order that was posted" ignore {
+    "return the tracking order for an order that was posted" in {
       val xmlOrder = 
-      <order><customerId>customer1</customerId>
-        <productId>Akka in action</productId>
-        <number>10</number>
-      </order>
+        <order>
+          <customerId>customer1</customerId>
+          <productId>Akka in action</productId>
+          <number>10</number>
+        </order>
       
       Post("/orders", xmlOrder) ~> routes ~> check {
         status shouldEqual StatusCodes.OK

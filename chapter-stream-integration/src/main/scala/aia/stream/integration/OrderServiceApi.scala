@@ -20,16 +20,15 @@ class OrderServiceApi(
 }
 
 trait OrderService {
+  import ProcessOrders._
+
   val processOrders: ActorRef
 
   implicit def executionContext: ExecutionContext
 
   implicit def requestTimeout: Timeout
 
-
   val routes = getOrder ~ postOrders
-
-
 
   def getOrder = get {
     pathPrefix("orders" / IntNumber) { id =>
@@ -45,8 +44,6 @@ trait OrderService {
       }
     }
   }
-
-  
 
   def postOrders = post {
     path("orders") {
@@ -68,8 +65,6 @@ trait OrderService {
     }
   }  
 
-
-
   def toOrder(xml: NodeSeq): Order = {
     val order = xml \\ "order"
     val customer = (order \\ "customerId").text
@@ -77,5 +72,4 @@ trait OrderService {
     val number = (order \\ "number").text.toInt
     new Order(customer, productId, number)
   }
-
 }

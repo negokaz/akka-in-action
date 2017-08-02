@@ -4,9 +4,9 @@ import java.io.{BufferedReader, File, InputStreamReader, PrintWriter}
 import java.net.Socket
 import java.nio.file.Path
 
+import aia.stream.integration.ProcessOrders._
 import akka.actor.ActorSystem
 import akka.testkit.TestKit
-
 import akka.NotUsed
 import akka.stream.ActorMaterializer
 import akka.stream.alpakka.amqp.{AmqpConnectionUri, NamedQueueSourceSettings}
@@ -85,7 +85,7 @@ class ConsumerTest extends TestKit(ActorSystem("ConsumerTest"))
     }
     "confirm xml TCPConnection" in {
       import Tcp._
-      import system.dispatcher
+      implicit val executionContext = system.dispatcher
 
       val msg = new Order("me", "Akka in Action", 10)
       val xml = <order>
@@ -166,7 +166,7 @@ class ConsumerTest extends TestKit(ActorSystem("ConsumerTest"))
 
   "The Producer" must {
     "send msg using TCPConnection" in {
-      import system.dispatcher
+      implicit val executionContext = system.dispatcher
 
       val serverBindingFuture =
         Tcp().bind("localhost", 8887).map { connection =>
