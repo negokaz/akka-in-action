@@ -6,11 +6,10 @@ import java.nio.file.Path
 
 import akka.actor.ActorSystem
 import akka.testkit.TestKit
-import javax.jms.{Connection, DeliveryMode, Session}
 
-import akka.{Done, NotUsed}
+import akka.NotUsed
 import akka.stream.ActorMaterializer
-import akka.stream.alpakka.amqp.{AmqpConnectionUri, NamedQueueSourceSettings, QueueDeclaration}
+import akka.stream.alpakka.amqp.{AmqpConnectionUri, NamedQueueSourceSettings}
 import akka.stream.alpakka.amqp.scaladsl.AmqpSource
 import akka.stream.alpakka.file.DirectoryChange
 import akka.stream.alpakka.file.scaladsl.DirectoryChangesSource
@@ -18,8 +17,6 @@ import akka.stream.scaladsl.{Flow, Framing, Keep, Sink, Source, Tcp}
 import akka.stream.testkit.scaladsl.TestSink
 import akka.util.ByteString
 import com.rabbitmq.client.{AMQP, ConnectionFactory}
-import org.apache.activemq.ActiveMQConnectionFactory
-import org.apache.activemq.broker.BrokerRegistry
 import org.apache.commons.io.FileUtils
 import org.scalatest.{BeforeAndAfterAll, MustMatchers, WordSpecLike}
 
