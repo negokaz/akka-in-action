@@ -2,18 +2,18 @@ package aia.stream.integration
 
 import java.io.{BufferedReader, File, InputStreamReader, PrintWriter}
 import java.net.Socket
-import java.nio.file.Path
+import java.nio.file.{Files, Path}
 
 import aia.stream.integration.ProcessOrders._
 import akka.actor.ActorSystem
 import akka.testkit.TestKit
-import akka.NotUsed
+import akka.{Done, NotUsed}
 import akka.stream.ActorMaterializer
-import akka.stream.alpakka.amqp.{AmqpConnectionUri, NamedQueueSourceSettings}
-import akka.stream.alpakka.amqp.scaladsl.AmqpSource
+import akka.stream.alpakka.amqp.{AmqpConnectionUri, AmqpSinkSettings, NamedQueueSourceSettings, OutgoingMessage}
+import akka.stream.alpakka.amqp.scaladsl.{AmqpSink, AmqpSource}
 import akka.stream.alpakka.file.DirectoryChange
 import akka.stream.alpakka.file.scaladsl.DirectoryChangesSource
-import akka.stream.scaladsl.{Flow, Framing, Keep, Sink, Source, Tcp}
+import akka.stream.scaladsl.{Flow, Framing, Keep, RunnableGraph, Sink, Source, Tcp}
 import akka.stream.testkit.scaladsl.TestSink
 import akka.util.ByteString
 import com.rabbitmq.client.{AMQP, ConnectionFactory}
@@ -58,11 +58,21 @@ class ConsumerTest extends TestKit(ActorSystem("ConsumerTest"))
   "Consumer" must {
     "pickup xml files" in {
 
-      val newFileSource: Source[Path, NotUsed] =
+      val newFileContentSource: Source[String, NotUsed] =
         DirectoryChangesSource(dir.toPath, pollInterval = 500.millis, maxBufferSize = 1000)
           .collect {
             case (path, DirectoryChange.Creation) => path
           }
+          .map(_.toFile)
+          .filter(file => file.isFile && file.canRead)
+          .map(scala.io.Source.fromFile(_).mkString)
+
+      val consumer: RunnableGraph[Future[Order]] =
+        newFileContentSource
+          .via(parseOrderXmlFlow)
+          .toMat(Sink.head[Order])(Keep.right)
+
+      val consumedOrder: Future[Order] = consumer.run()
 
       val msg = new Order("me", "Akka in Action", 10)
       val xml = <order>
@@ -70,18 +80,11 @@ class ConsumerTest extends TestKit(ActorSystem("ConsumerTest"))
                   <productId>{ msg.productId }</productId>
                   <number>{ msg.number }</number>
                 </order>
-
       val msgFile = new File(dir, "msg1.xml")
-
-      val changes: Future[Order] =
-        newFileSource
-          .map(path => scala.io.Source.fromFile(path.toFile).mkString)
-          .via(parseOrderXmlFlow)
-          .runWith(Sink.head[Order])
 
       FileUtils.write(msgFile, xml.toString())
 
-      Await.result(changes, 10.seconds) must be(msg)
+      Await.result(consumedOrder, 10.seconds) must be(msg)
     }
     "confirm xml TCPConnection" in {
       import Tcp._
@@ -138,13 +141,14 @@ class ConsumerTest extends TestKit(ActorSystem("ConsumerTest"))
     }
     "pickup xml RabbitMQ" in {
       val queueName = "xmlTest"
-      val amqpSource = AmqpSource(
+      val amqpSettings =
         NamedQueueSourceSettings(
           AmqpConnectionUri("amqp://localhost:8899"),
           queueName
-        ),
-        bufferSize = 10
-      )
+        )
+      val amqpSource: Source[String, NotUsed] =
+          AmqpSource(amqpSettings, bufferSize = 10)
+            .map(_.bytes.utf8String)
 
       val msg = new Order("me", "Akka in Action", 10)
       val xml = <order>
@@ -153,14 +157,15 @@ class ConsumerTest extends TestKit(ActorSystem("ConsumerTest"))
                   <number>{ msg.number }</number>
                 </order>
 
-      sendMQMessage(xml.toString)
+      sendMQMessage(queueName, xml.toString)
 
-      val orderFuture = amqpSource
-        .map(_.bytes.utf8String)
-        .via(parseOrderXmlFlow)
-        .toMat(Sink.head)(Keep.right).run()
+      val consumer: RunnableGraph[Future[Order]] =
+        amqpSource
+          .via(parseOrderXmlFlow)
+          .toMat(Sink.head)(Keep.right)
 
-      Await.result(orderFuture, 10 seconds) must be(msg)
+      val consumedOrder: Future[Order] = consumer.run()
+      Await.result(consumedOrder, 10 seconds) must be(msg)
     }
   }
 
@@ -203,9 +208,53 @@ class ConsumerTest extends TestKit(ActorSystem("ConsumerTest"))
 
       Await.result(probeFuture, 10 seconds).requestNext().utf8String must be ("<confirm>OK</confirm>")
     }
+
+    "send msg using AMQP" in {
+      implicit val executionContext = system.dispatcher
+
+      val queueName = "xmlTest"
+
+      val amqpSinkSettings =
+        AmqpSinkSettings(
+          AmqpConnectionUri("amqp://localhost:8899"),
+          routingKey = Some(queueName)
+        )
+      val amqpSink: Sink[ByteString, Future[Done]] =
+        AmqpSink.simple(amqpSinkSettings)
+
+      val msg = new Order("me", "Akka in Action", 10)
+      val xml = <order>
+                  <customerId>{ msg.customerId }</customerId>
+                  <productId>{ msg.productId }</productId>
+                  <number>{ msg.number }</number>
+                </order>
+
+      val producer: RunnableGraph[NotUsed] =
+        Source.single(xml)
+              .map(msg => ByteString(msg.toString))
+              .to(amqpSink)
+
+      val amqpSourceSettings =
+        NamedQueueSourceSettings(
+          AmqpConnectionUri("amqp://localhost:8899"),
+          queueName
+        )
+      val amqpSource: Source[String, NotUsed] =
+        AmqpSource(amqpSourceSettings, bufferSize = 10)
+          .map(_.bytes.utf8String)
+
+      val consumer: RunnableGraph[Future[Order]] =
+        amqpSource
+          .via(parseOrderXmlFlow)
+          .toMat(Sink.head)(Keep.right)
+
+      producer.run()
+
+      val consumedOrder: Future[Order] = consumer.run()
+      Await.result(consumedOrder, 10 seconds) must be(msg)
+    }
   }
-  def sendMQMessage(msg: String): Unit = {
-    val queueName = "xmlTest"
+  def sendMQMessage(queueName: String, msg: String): Unit = {
 
     // Create a ConnectionFactory
     val connectionFactory = new ConnectionFactory
