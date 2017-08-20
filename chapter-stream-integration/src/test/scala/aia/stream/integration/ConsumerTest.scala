@@ -11,6 +11,7 @@ import akka.stream.alpakka.amqp.{AmqpConnectionUri, AmqpSinkSettings, NamedQueue
 import akka.stream.scaladsl.{Flow, Framing, Keep, RunnableGraph, Sink, Source, Tcp}
 import akka.stream.testkit.scaladsl.TestSink
 import akka.util.ByteString
+import io.arivera.oss.embedded.rabbitmq.{EmbeddedRabbitMq, EmbeddedRabbitMqConfig, PredefinedVersion}
 import com.rabbitmq.client.{AMQP, ConnectionFactory}
 import org.apache.commons.io.FileUtils
 import org.scalatest.{BeforeAndAfterAll, MustMatchers, WordSpecLike}
@@ -26,6 +27,17 @@ class ConsumerTest extends TestKit(ActorSystem("ConsumerTest"))
 
   val dir = new File("messages")
 
+  val rabbitMq = {
+    val config = new EmbeddedRabbitMqConfig.Builder()
+      .version(PredefinedVersion.V3_6_9)
+      .port(8899)
+      .rabbitMqServerInitializationTimeoutInMillis(5000)
+      .build
+    val mq = new EmbeddedRabbitMq(config)
+    mq.start()
+    mq
+  }
+
   override def beforeAll(): Unit = {
     if (!dir.exists()) {
       dir.mkdir()
@@ -34,6 +46,7 @@ class ConsumerTest extends TestKit(ActorSystem("ConsumerTest"))
 
   override def afterAll(): Unit = {
     system.terminate()
+    rabbitMq.stop()
     FileUtils.deleteDirectory(dir)
   }
 
