@@ -3,10 +3,9 @@ package aia.stream.integration
 import akka.actor.Actor
 
 import scala.collection.mutable
+import aia.stream.integration.Orders._
 
 object ProcessOrders {
-
-  case class Order(customerId: String, productId: String, number: Int)
 
   case class TrackingOrder(id: Long, status: String, order: Order)
 

@@ -20,6 +20,7 @@ class OrderServiceApi(
 }
 
 trait OrderService {
+  import Orders._
   import ProcessOrders._
 
   val processOrders: ActorRef
@@ -34,10 +35,12 @@ trait OrderService {
     pathPrefix("orders" / IntNumber) { id =>
       onSuccess(processOrders.ask(OrderId(id))) {
         case result: TrackingOrder =>
-          complete(<statusResponse>
-            <id>{ result.id }</id>
-            <status>{ result.status }</status>
-          </statusResponse>)
+          complete(
+            <statusResponse>
+              <id>{ result.id }</id>
+              <status>{ result.status }</status>
+            </statusResponse>
+          )
         
         case result: NoSuchOrder => 
           complete(StatusCodes.NotFound)
